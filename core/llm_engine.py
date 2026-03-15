@@ -1,6 +1,4 @@
 import ollama
-from config import MODEL
-
 
 def map_query_columns(query, columns):
 
