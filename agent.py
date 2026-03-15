@@ -70,9 +70,10 @@ def map_query_columns(query, df):
     return list(set(matched_columns))
 
 
-def run_agent(query, df, persona):
-
+def run_agent(query, df, persona, selected_column=None):
     matched_columns = detect_intent_columns(query, df)
+    if selected_column:
+        matched_columns = [selected_column]
 
     # no column detected
     if len(matched_columns) == 0:

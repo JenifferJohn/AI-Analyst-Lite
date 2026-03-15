@@ -61,22 +61,31 @@ if file:
     )
 
     if st.button("Run"):
-
         try:
 
             validate_query(query)
+             result = run_agent(query, df, persona)
 
-            result = run_agent(query, df, persona)
+            # clarification flow
+            if isinstance(result, dict) and result.get("type") == "clarification":
+                st.warning(result["message"])
 
-            if hasattr(result, "figure"):
+                selected_column = st.selectbox(
+                    "Select a column",
+                    result["options"]
+                )
+
+                if st.button("Confirm Selection"):
+                    # rerun agent with selected column
+                    result = run_agent(query, df, persona, selected_column)
+                    st.write(result)
+
+            # dataframe result
+            elif isinstance(result, pd.DataFrame):
+                st.dataframe(result)
+            # chart result
+            elif hasattr(result, "figure"):
                 st.pyplot(result)
-
-            elif str(type(result)).startswith("<class 'matplotlib"):
-                st.pyplot(result)
-
+            # text result
             else:
                 st.write(result)
-
-        except Exception as e:
-
-            st.error(str(e))
