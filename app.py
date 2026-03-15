@@ -1,92 +1,138 @@
 import streamlit as st
 import pandas as pd
 
-from analysis_agent import generate_analysis_code
-from executor import run_analysis
-from visualization import render_result
-from guardrails import validate_query
+from core.analytics_engine import run_query, auto_chart, detect_trend
+from core.guardrails import suggest_columns
+from core.llm_engine import summarize, is_summary_query
 
-st.set_page_config(page_title="AI Analyst")
 
-st.title("AI Analyst Chatbot")
+st.set_page_config(page_title="AI Excel Analyst", layout="wide")
 
-persona = st.selectbox(
-    "User Profile",
-    ["Technical", "Business"]
-)
+st.title("AI Analyst for Excel")
 
-uploaded_file = st.file_uploader(
-    "Upload Excel or CSV",
-    type=["csv", "xlsx"]
-)
+
+@st.cache_data
+def load_data(file):
+
+    if file.name.endswith(".csv"):
+        return pd.read_csv(file)
+
+    return pd.read_excel(file)
+
+
+file = st.file_uploader("Upload Excel or CSV", type=["xlsx", "csv"])
+
+if not file:
+    st.info("Upload dataset to begin")
+    st.stop()
+
+
+df = load_data(file)
+
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if uploaded_file:
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-    if uploaded_file.name.endswith("xlsx"):
-        df = pd.read_excel(uploaded_file)
+if "analysis_memory" not in st.session_state:
+    st.session_state.analysis_memory = []
+
+
+for msg in st.session_state.messages:
+
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+
+query = st.chat_input("Ask about your dataset")
+
+if not query:
+    st.stop()
+
+
+st.session_state.messages.append(
+    {"role": "user", "content": query}
+)
+
+
+if is_summary_query(query):
+
+    summary = summarize(
+        st.session_state.analysis_memory
+    )
+
+    with st.chat_message("assistant"):
+        st.write(summary)
+
+    st.stop()
+
+
+suggest = suggest_columns(query, df)
+
+if suggest:
+
+    st.info("Possible columns")
+
+    cols = st.columns(len(suggest))
+
+    for i, c in enumerate(suggest):
+
+        if cols[i].button(c):
+            st.rerun()
+
+
+history = "\n".join(
+    st.session_state.history[-5:]
+)
+
+
+success, result = run_query(
+    query,
+    df,
+    history
+)
+
+
+with st.chat_message("assistant"):
+
+    if not success:
+
+        st.warning(result)
+
     else:
-        df = pd.read_csv(uploaded_file)
 
-    df.columns = df.columns.str.lower().str.replace(" ", "_")
+        if result["status"] == "empty":
 
-    st.success("Dataset loaded")
+            st.info(result["message"])
 
-    st.subheader("Dataset preview")
-    st.dataframe(df.head())
+        else:
 
-    st.subheader("Columns")
+            data = result["data"]
 
-    schema = pd.DataFrame({
-        "column": df.columns,
-        "datatype": df.dtypes.astype(str)
-    })
+            if isinstance(data, pd.DataFrame):
 
-    st.dataframe(schema)
+                st.dataframe(data)
 
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+                chart = auto_chart(data)
 
-    query = st.chat_input("Ask a question about your dataset")
+                if chart:
+                    st.plotly_chart(chart)
 
-    if query:
+                trend = detect_trend(data)
 
-        st.session_state.messages.append({"role": "user", "content": query})
+                if trend:
+                    st.info(trend)
 
-        with st.chat_message("user"):
-            st.markdown(query)
+                st.session_state.analysis_memory.append({
+                    "query": query,
+                    "preview": str(data.head())
+                })
 
-        try:
+            else:
 
-            validate_query(query)
+                st.write(data)
 
-            code = generate_analysis_code(query, df)
 
-            result = run_analysis(code, df)
-
-            with st.chat_message("assistant"):
-
-                st.markdown("### Analysis Result")
-
-                output = render_result(result)
-
-                if hasattr(output, "figure"):
-                    st.pyplot(output)
-
-                elif isinstance(output, pd.DataFrame):
-                    st.dataframe(output)
-
-                else:
-                    st.markdown(str(output))
-
-            st.session_state.messages.append(
-                {"role": "assistant", "content": str(result)}
-            )
-
-        except Exception as e:
-
-            with st.chat_message("assistant"):
-                st.error(f"Error: {e}")
+st.session_state.history.append(query)
