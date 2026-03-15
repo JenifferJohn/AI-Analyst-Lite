@@ -64,12 +64,14 @@ if file:
         try:
 
             validate_query(query)
-             result = run_agent(query, df, persona)
+            result = run_agent(query, df, persona)
 
             # clarification flow
+            
             if isinstance(result, dict) and result.get("type") == "clarification":
                 st.warning(result["message"])
-
+                st.write("Please choose one:")
+                
                 selected_column = st.selectbox(
                     "Select a column",
                     result["options"]
