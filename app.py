@@ -1,54 +1,59 @@
 import streamlit as st
 import pandas as pd
-import sys
-import os
 
-sys.path.append(os.path.dirname(__file__))
-
-from agent import run_agent
+from analysis_agent import generate_analysis_code
+from executor import run_analysis
+from visualization import render_result
 from guardrails import validate_query
 
-st.title("AI Data Analyst")
+st.set_page_config(page_title="AI Analyst")
+
+st.title("AI Analyst Chatbot")
 
 persona = st.selectbox(
     "User Profile",
     ["Technical", "Business"]
 )
 
-file = st.file_uploader(
+uploaded_file = st.file_uploader(
     "Upload Excel or CSV",
     type=["csv", "xlsx"]
 )
 
-# chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if file:
+if uploaded_file:
 
-    if file.name.endswith("xlsx"):
-        df = pd.read_excel(file)
+    if uploaded_file.name.endswith("xlsx"):
+        df = pd.read_excel(uploaded_file)
     else:
-        df = pd.read_csv(file)
+        df = pd.read_csv(uploaded_file)
 
     df.columns = df.columns.str.lower().str.replace(" ", "_")
 
-    st.success("Dataset Loaded")
+    st.success("Dataset loaded")
 
-    st.subheader("Dataset Preview")
-    st.dataframe(df.sample(min(8, len(df))))
+    st.subheader("Dataset preview")
+    st.dataframe(df.head())
 
-    # display previous chat
+    st.subheader("Columns")
+
+    schema = pd.DataFrame({
+        "column": df.columns,
+        "datatype": df.dtypes.astype(str)
+    })
+
+    st.dataframe(schema)
+
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # chat input
-    query = st.chat_input("Ask a question about the dataset")
+    query = st.chat_input("Ask a question about your dataset")
 
     if query:
 
-        # show user message
         st.session_state.messages.append({"role": "user", "content": query})
 
         with st.chat_message("user"):
@@ -58,45 +63,24 @@ if file:
 
             validate_query(query)
 
-            result = run_agent(query, df, persona)
+            code = generate_analysis_code(query, df)
+
+            result = run_analysis(code, df)
 
             with st.chat_message("assistant"):
 
-                # clarification flow
-                if isinstance(result, dict) and result.get("type") == "clarification":
+                st.markdown("### Analysis Result")
 
-                    st.markdown(result["message"])
+                output = render_result(result)
 
-                    options = result.get("options", [])
+                if hasattr(output, "figure"):
+                    st.pyplot(output)
 
-                    cols = st.columns(len(options))
-
-                    for i, option in enumerate(options):
-
-                        label = option.replace("_", " ").title()
-
-                        if cols[i].button(label):
-
-                            final_result = run_agent(query, df, persona, option)
-
-                            st.markdown(f"Analyzing **{label}**")
-
-                            if isinstance(final_result, pd.DataFrame):
-                                st.dataframe(final_result)
-                            else:
-                                st.markdown(str(final_result))
-
-                elif isinstance(result, pd.DataFrame):
-
-                    st.dataframe(result)
-
-                elif hasattr(result, "figure"):
-
-                    st.pyplot(result)
+                elif isinstance(output, pd.DataFrame):
+                    st.dataframe(output)
 
                 else:
-
-                    st.markdown(str(result))
+                    st.markdown(str(output))
 
             st.session_state.messages.append(
                 {"role": "assistant", "content": str(result)}

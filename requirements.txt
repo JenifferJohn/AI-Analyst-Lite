@@ -2,4 +2,5 @@ streamlit
 pandas
 matplotlib
 ollama
+duckdb
 openpyxl
