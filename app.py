@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
-from agent import run_agent
-from guardrails import validate_query
 import sys
 import os
 
 sys.path.append(os.path.dirname(__file__))
+
+from agent import run_agent
+from guardrails import validate_query
 
 st.title("AI Data Analyst")
 
@@ -19,75 +20,89 @@ file = st.file_uploader(
     type=["csv", "xlsx"]
 )
 
+# chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 if file:
 
     if file.name.endswith("xlsx"):
         df = pd.read_excel(file)
     else:
         df = pd.read_csv(file)
+
     df.columns = df.columns.str.lower().str.replace(" ", "_")
+
     st.success("Dataset Loaded")
 
     st.subheader("Dataset Preview")
-    st.dataframe(df.sample(8))
+    st.dataframe(df.sample(min(8, len(df))))
 
-    st.subheader("Dataset Info")
-    schema_df = df.dtypes.reset_index()
-    schema_df.columns = ["Column", "Data Type"]
+    # display previous chat
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-    st.dataframe(schema_df)
+    # chat input
+    query = st.chat_input("Ask a question about the dataset")
 
-    st.write("Columns:", list(df.columns))
-    st.write("Rows:", len(df))
+    if query:
 
-    st.subheader("Example Questions")
+        # show user message
+        st.session_state.messages.append({"role": "user", "content": query})
 
-    examples = [
-        "What is the total revenue?",
-        "Show average sales by region",
-        "Plot sales distribution",
-        "Which variable correlates with revenue?",
-        "Why did sales decrease?",
-        "What trends exist in the dataset?"
-    ]
+        with st.chat_message("user"):
+            st.markdown(query)
 
-    for q in examples:
-        if st.button(q):
-            st.session_state["query"] = q
-
-    query = st.text_input(
-        "Ask a question",
-        value=st.session_state.get("query", "")
-    )
-
-    if st.button("Run"):
         try:
 
             validate_query(query)
+
             result = run_agent(query, df, persona)
 
-            # clarification flow
-            
-            if isinstance(result, dict) and result.get("type") == "clarification":
-                st.warning(result["message"])
-                st.write("Please choose one:")
-                
-                selected_column = st.selectbox(
-                    "Select a column",
-                    result["options"]
-                )
+            with st.chat_message("assistant"):
 
-                if st.button("Confirm Selection"):
-                    # rerun agent with selected column
-                    result = run_agent(query, df, persona, selected_column)
-                    st.write(result)
+                # clarification flow
+                if isinstance(result, dict) and result.get("type") == "clarification":
 
-            # dataframe result
-            elif isinstance(result, pd.DataFrame):
-                st.dataframe(result)
-            # chart result
-            elif hasattr(result, "figure"):
-                st.pyplot(result)
-            # text result
-            else:
-                st.write(result)
+                    st.markdown(result["message"])
+
+                    options = result.get("options", [])
+
+                    cols = st.columns(len(options))
+
+                    for i, option in enumerate(options):
+
+                        label = option.replace("_", " ").title()
+
+                        if cols[i].button(label):
+
+                            final_result = run_agent(query, df, persona, option)
+
+                            st.markdown(f"Analyzing **{label}**")
+
+                            if isinstance(final_result, pd.DataFrame):
+                                st.dataframe(final_result)
+                            else:
+                                st.markdown(str(final_result))
+
+                elif isinstance(result, pd.DataFrame):
+
+                    st.dataframe(result)
+
+                elif hasattr(result, "figure"):
+
+                    st.pyplot(result)
+
+                else:
+
+                    st.markdown(str(result))
+
+            st.session_state.messages.append(
+                {"role": "assistant", "content": str(result)}
+            )
+
+        except Exception as e:
+
+            with st.chat_message("assistant"):
+                st.error(f"Error: {e}")
