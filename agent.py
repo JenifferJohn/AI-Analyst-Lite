@@ -18,11 +18,31 @@ def route_query(query):
 
     return "analytics"
 
+def map_query_columns(query, df):
+
+    query_words = query.lower().split()
+
+    columns = df.columns.tolist()
+
+    matched_columns = []
+
+    for col in columns:
+
+        col_words = col.lower().replace("_", " ").split()
+
+        for q in query_words:
+
+            for cw in col_words:
+
+                if q in cw or cw in q:
+                    matched_columns.append(col)
+
+    return list(set(matched_columns))
+
 
 def run_agent(query, df, persona):
 
-    if not dataset_contains_keywords(query, df):
-        return "IRRELEVANT_TO_DATASET"
+    matched_columns = map_query_columns(query, df)
 
     route = route_query(query)
 
@@ -37,6 +57,23 @@ def run_agent(query, df, persona):
 
     if route == "reasoning":
 
-        summary = df.describe().to_string()
+        schema = df.dtypes.to_string()
+        sample = df.head(10).to_string()
+
+        summary = f"""
+DATASET COLUMNS:
+{df.columns.tolist()}
+
+MATCHED COLUMNS FROM QUERY:
+{matched_columns}
+
+DATASET SCHEMA:
+{schema}
+
+SAMPLE DATA:
+{sample}
+"""
+
+        return ask_llm(query, summary, persona)
 
         return ask_llm(query, summary, persona)
