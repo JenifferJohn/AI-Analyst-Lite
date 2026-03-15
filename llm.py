@@ -41,7 +41,7 @@ def ask_llm(query, summary, persona):
     """
 
     response = ollama.chat(
-        model="mistral"
+        model="mistral",
         messages=[{"role": "user", "content": prompt}],
         options={"temperature": 0}
     )

@@ -11,7 +11,7 @@ st.title("AI Data Analyst")
 
 persona = st.selectbox(
     "User Profile",
-    ["technical", "business"]
+    ["Technical", "Business"]
 )
 
 file = st.file_uploader(
