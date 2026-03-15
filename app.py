@@ -25,7 +25,7 @@ if file:
         df = pd.read_excel(file)
     else:
         df = pd.read_csv(file)
-
+    df.columns = df.columns.str.lower().str.replace(" ", "_")
     st.success("Dataset Loaded")
 
     st.subheader("Dataset Preview")
