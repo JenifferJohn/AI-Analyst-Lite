@@ -20,7 +20,7 @@ You must answer ONLY using the dataset summary.
 If the dataset cannot answer the question,
 respond exactly:
 
-IRRELEVANT_TO_DATASET
+IM NOT SURE HOW TO ANSWER THIS BASED ON THE DATA
 """
 
 
@@ -41,7 +41,7 @@ def ask_llm(query, summary, persona):
     """
 
     response = ollama.chat(
-        model="mistral-7b-instruct",
+        model="mistral"
         messages=[{"role": "user", "content": prompt}],
         options={"temperature": 0}
     )

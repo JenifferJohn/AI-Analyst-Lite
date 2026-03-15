@@ -29,9 +29,13 @@ if file:
     st.success("Dataset Loaded")
 
     st.subheader("Dataset Preview")
-    st.dataframe(df.head())
+    st.dataframe(df.sample(8))
 
     st.subheader("Dataset Info")
+    schema_df = df.dtypes.reset_index()
+    schema_df.columns = ["Column", "Data Type"]
+
+    st.dataframe(schema_df)
 
     st.write("Columns:", list(df.columns))
     st.write("Rows:", len(df))
