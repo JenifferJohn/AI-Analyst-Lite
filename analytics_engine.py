@@ -86,50 +86,48 @@ def detect_anomalies(df):
     return anomalies
 
 
-def discover_highlevel_insights(df,profile):
+def discover_highlevel_insights(df, profile):
 
-    insights=[]
+    insights = []
 
-    metric = profile["metrics"][0]
+    metrics = profile["metrics"]
+    dims = profile["dimensions"]
+    time_col = profile["time"]
 
-    if profile["dimensions"]:
-
-        dim=profile["dimensions"][0]
-
-        grouped=df.groupby(dim)[metric].sum().sort_values(ascending=False)
+    if not metrics:
 
         insights.append({
-            "title":"Top Performer",
-            "description":f"{grouped.index[0]} has highest {metric}",
-            "evidence":grouped.head(5)
+            "title": "Dataset Overview",
+            "description": "No numeric metrics detected in dataset.",
+            "evidence": df.head()
         })
 
-    if profile["time"]:
+        return insights
 
-        trend=df.groupby(profile["time"])[metric].sum()
+    metric = metrics[0]
+
+    # top performer insight
+    if dims:
+
+        dim = dims[0]
+
+        grouped = df.groupby(dim)[metric].sum().sort_values(ascending=False)
 
         insights.append({
-            "title":"Trend",
-            "description":f"{metric} trend detected",
-            "evidence":trend.tail(5)
+            "title": "Top Performer",
+            "description": f"{grouped.index[0]} has the highest {metric}",
+            "evidence": grouped.head(5)
         })
 
-    drivers=detect_drivers(df,metric)
+    # trend insight
+    if time_col:
 
-    insights.append({
-        "title":"Drivers",
-        "description":f"{drivers.index[0]} strongly correlates with {metric}",
-        "evidence":drivers
-    })
-
-    anomalies=detect_anomalies(df)
-
-    if anomalies:
+        trend = df.groupby(time_col)[metric].sum()
 
         insights.append({
-            "title":"Anomalies",
-            "description":f"{len(anomalies)} variables contain outliers",
-            "evidence":anomalies
+            "title": "Trend",
+            "description": f"{metric} shows variation across {time_col}",
+            "evidence": trend.tail(5)
         })
 
     return insights

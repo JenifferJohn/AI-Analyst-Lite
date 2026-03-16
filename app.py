@@ -27,9 +27,21 @@ if file:
         df = pd.read_csv(file)
 
     df.columns = df.columns.str.lower().str.replace(" ","_")
+    
+    
+    # fix numeric types
+    for col in df.columns:
+        df[col] = df[col].replace(",", "", regex=True)
+        df[col] = pd.to_numeric(df[col], errors="ignore")
 
-    st.success("Dataset Loaded")
+    st.success("Dataset Loaded")  
 
+    profile = analyze_dataset(df)
+
+    st.write("Detected Metrics:", profile["metrics"])
+    st.write("Detected Dimensions:", profile["dimensions"])
+    st.write("Detected Time Column:", profile["time"])
+    
     embeddings = embed_columns(df.columns)
 
     profile = analyze_dataset(df)
