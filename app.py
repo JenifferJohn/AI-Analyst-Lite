@@ -1,138 +1,78 @@
 import streamlit as st
 import pandas as pd
 
-from core.analytics_engine import run_query, auto_chart, detect_trend
-from core.guardrails import suggest_columns
-from core.llm_engine import summarize, is_summary_query
+from agent import run_agent
+from intelligence_engine import embed_columns
+from data_intelligence import analyze_dataset
+from analytics_engine import discover_highlevel_insights
+from utilities import validate_query
 
+st.title("AI Data Analyst Copilot")
 
-st.set_page_config(page_title="AI Excel Analyst", layout="wide")
-
-st.title("AI Analyst for Excel")
-
-
-@st.cache_data
-def load_data(file):
-
-    if file.name.endswith(".csv"):
-        return pd.read_csv(file)
-
-    return pd.read_excel(file)
-
-
-file = st.file_uploader("Upload Excel or CSV", type=["xlsx", "csv"])
-
-if not file:
-    st.info("Upload dataset to begin")
-    st.stop()
-
-
-df = load_data(file)
-
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-if "analysis_memory" not in st.session_state:
-    st.session_state.analysis_memory = []
-
-
-for msg in st.session_state.messages:
-
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
-
-
-query = st.chat_input("Ask about your dataset")
-
-if not query:
-    st.stop()
-
-
-st.session_state.messages.append(
-    {"role": "user", "content": query}
+persona = st.selectbox(
+    "User Profile",
+    ["Business","Technical"]
 )
 
-
-if is_summary_query(query):
-
-    summary = summarize(
-        st.session_state.analysis_memory
-    )
-
-    with st.chat_message("assistant"):
-        st.write(summary)
-
-    st.stop()
-
-
-suggest = suggest_columns(query, df)
-
-if suggest:
-
-    st.info("Possible columns")
-
-    cols = st.columns(len(suggest))
-
-    for i, c in enumerate(suggest):
-
-        if cols[i].button(c):
-            st.rerun()
-
-
-history = "\n".join(
-    st.session_state.history[-5:]
+file = st.file_uploader(
+    "Upload dataset",
+    ["csv","xlsx"]
 )
 
+if file:
 
-success, result = run_query(
-    query,
-    df,
-    history
-)
-
-
-with st.chat_message("assistant"):
-
-    if not success:
-
-        st.warning(result)
-
+    if file.name.endswith("xlsx"):
+        df = pd.read_excel(file)
     else:
+        df = pd.read_csv(file)
 
-        if result["status"] == "empty":
+    df.columns = df.columns.str.lower().str.replace(" ","_")
 
-            st.info(result["message"])
+    st.success("Dataset Loaded")
 
-        else:
+    embeddings = embed_columns(df.columns)
 
-            data = result["data"]
+    profile = analyze_dataset(df)
 
-            if isinstance(data, pd.DataFrame):
+    st.markdown("## Automatic Insights")
 
-                st.dataframe(data)
+    insights = discover_highlevel_insights(df,profile)
 
-                chart = auto_chart(data)
+    for i in insights:
 
-                if chart:
-                    st.plotly_chart(chart)
+        st.markdown(f"### {i['title']}")
 
-                trend = detect_trend(data)
+        st.markdown(i["description"])
 
-                if trend:
-                    st.info(trend)
+        st.dataframe(i["evidence"])
 
-                st.session_state.analysis_memory.append({
-                    "query": query,
-                    "preview": str(data.head())
-                })
+    query = st.chat_input("Ask about your dataset")
 
-            else:
+    if query:
 
-                st.write(data)
+        validate_query(query)
 
+        with st.chat_message("user"):
+            st.markdown(query)
 
-st.session_state.history.append(query)
+        status = st.status("Processing Query",expanded=True)
+
+        status.write("Understanding query")
+        status.write("Classifying intent")
+        status.write("Mapping dataset columns")
+
+        result = run_agent(query,df,persona,embeddings)
+
+        status.write("Running analytics")
+        status.update(label="Analysis Complete",state="complete")
+
+        with st.chat_message("assistant"):
+
+            st.markdown(result["insight"])
+
+            st.dataframe(result["data"])
+
+            st.markdown("### Execution Trace")
+
+            for s in result["steps"]:
+                st.markdown(f"- {s}")
