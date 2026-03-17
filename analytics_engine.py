@@ -55,18 +55,15 @@ def correlation_analysis(df,metric):
 def detect_drivers(df,target_metric):
 
     numeric = df.select_dtypes(include="number")
-
     corr = numeric.corr()[target_metric].drop(target_metric)
-
     drivers = corr.sort_values(ascending=False)
-
+    
     return drivers.head(5)
 
 
 def detect_anomalies(df):
 
     anomalies=[]
-
     numeric = df.select_dtypes(include="number")
 
     for col in numeric.columns:

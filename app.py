@@ -7,7 +7,7 @@ from data_intelligence import analyze_dataset
 from analytics_engine import discover_highlevel_insights
 from utilities import validate_query
 
-st.title("AI Data Analyst Copilot")
+st.title("AI Analyst Chatbot")
 
 persona = st.selectbox(
     "User Profile",

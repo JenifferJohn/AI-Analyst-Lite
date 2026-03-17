@@ -8,7 +8,7 @@ def analyze_dataset(df):
     time_col = None
 
     for col in df.columns:
-
+        
         col_lower = col.lower()
         # detect time column
         if any(x in col_lower for x in ["date", "month", "year", "week"]):
@@ -23,9 +23,7 @@ def analyze_dataset(df):
 
     # fallback: if no metrics detected
     if len(metrics) == 0:
-
         numeric_cols = df.select_dtypes(include=["int64","float64"]).columns.tolist()
-
         metrics = numeric_cols
 
     return {
