@@ -17,7 +17,7 @@ if file:
     df = pd.read_excel(file) if file.name.endswith("xlsx") else pd.read_csv(file)
 
     # clean column names
-    df.columns = df.columns.str.lower().str.replace("[^a-z0-9]+","_",regex=True)
+    df.columns = df.columns.str.strip().str.replace(" ", "_").str.replace("-", "_")
 
     # fix numeric columns
     for col in df.columns:
