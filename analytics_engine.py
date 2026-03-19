@@ -119,32 +119,12 @@ def discover_highlevel_insights(df, profile):
     # trend insight
     if time_col:
 
-        trend = trend_analysis(df, metric, time_col)
+        trend = df.groupby(time_col)[metric].sum()
 
-        if trend is not None and len(trend) > 1 and "value" in trend.columns:
-
-            # sort properly
-            trend = trend.sort_values(by=time_col)
-
-            first = trend.iloc[0]["value"]
-            last = trend.iloc[-1]["value"]
-
-            if first != 0:
-
-                change = last - first
-                pct_change = (change / first) * 100
-
-                direction = "increased" if change > 0 else "decreased"
-
-                # peak detection
-                peak_row = trend.loc[trend["value"].idxmax()]
-                peak_time = peak_row[time_col]
-                peak_value = peak_row["value"]
-
-                insights.append({
-                    "title": "Trend",
-                    "description": f"{metric} {direction} by {abs(change):,.0f} ({abs(pct_change):.1f}%) over time. Peak in {peak_time} at {peak_value:,.0f}.",
-                    "evidence": trend.tail(5)
-                })
+        insights.append({
+            "title": "Trend",
+            "description": f"{metric} shows variation across {time_col}",
+            "evidence": trend.tail(5)
+        })
 
     return insights
