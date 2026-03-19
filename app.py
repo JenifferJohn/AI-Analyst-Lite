@@ -61,8 +61,28 @@ if file:
 
     date_candidates = detect_date_candidates(df)
 
-    st.sub
-    
+    st.subheader("Select Time Column")
+
+    if date_candidates:
+
+        date_column = st.selectbox(
+            "Detected Date Columns",
+            ["None"] + date_candidates,
+            index=1
+        )
+
+    else:
+
+        st.warning("No date columns detected. Please select manually.")
+
+        date_column = st.selectbox(
+            "Select Date Column",
+            ["None"] + list(df.columns)
+        )
+
+    if date_column == "None":
+        date_column = None
+
     
     # fix numeric types
     for col in df.columns:
