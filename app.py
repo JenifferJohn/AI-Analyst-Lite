@@ -103,7 +103,7 @@ if file:
 
     st.markdown("## Automatic Insights")
 
-    insights = discover_highlevel_insights(df,profile)
+    insights = discover_highlevel_insights(df, profile, target_column)
 
     for i in insights:
 
