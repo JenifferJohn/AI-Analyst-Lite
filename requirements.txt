@@ -2,7 +2,4 @@ streamlit
 pandas
 duckdb
 matplotlib
-sentence-transformers
-ollama
-scikit-learn
-openpyxl
+requests

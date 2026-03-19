@@ -1,82 +1,109 @@
-from utilities import StepLogger,cache_get,cache_store,dataset_hash
-from intelligence_engine import classify_intent,map_column,generate_insight
-from data_intelligence import analyze_dataset
-from query_planner import plan_query
-from analytics_engine import *
+from data_engine import get_schema, get_column_info, run_query, validate_sql
+from insight_engine import generate_insights
+from chart_engine import generate_chart_safe
+from llm import ask_llm
+from utils import match_columns, validate_user_query, get_cached_result, set_cache, Timer
 
 
-def run_agent(query,df,persona,embeddings):
+def extract_entities(query):
+    prompt = f"""
+    Extract:
+    metric, dimensions
 
-    logger=StepLogger()
+    Query: {query}
 
-    key = dataset_hash(df)+query
+    Return JSON.
+    """
+    return eval(ask_llm(prompt))
 
-    cached=cache_get(key)
 
-    if cached:
-        return cached
+def run_agent(query, profile, resolved=None):
 
-    profile=analyze_dataset(df)
+    timer = Timer()
 
-    logger.log("Dataset analyzed")
+    try:
+        validate_user_query(query)
 
-    intent,confidence = classify_intent(query)
+        cached = get_cached_result(query)
+        if cached:
+            return cached
 
-    logger.log(f"Intent → {intent}")
-    logger.log(f"Confidence → {confidence}")
+        schema = get_schema()
+        column_info = get_column_info()
+        columns = list(column_info.keys())
 
-    if confidence < 0.6:
+        entities = extract_entities(query)
 
-        return {
-            "type":"clarification",
-            "message":"Intent unclear",
-            "options":["summary","trend","groupby","drivers"]
+        metric = entities.get("metric", "")
+        dimensions = entities.get("dimensions", [])
+
+        # 🔹 If already resolved from UI
+        if resolved:
+            mapping = resolved
+        else:
+            mapping = match_columns([metric] + dimensions, columns)
+
+            # Need clarification
+            for k, v in mapping.items():
+                if len(v) == 0 or len(v) > 1:
+                    return {
+                        "clarification": True,
+                        "mapping": mapping,
+                        "message": "Please clarify your intent "
+                    }
+
+        # Resolve mapping
+        mapping = {k: v[0] if isinstance(v, list) else v for k, v in mapping.items()}
+
+        # Generate SQL
+        sql_prompt = f"""
+        Schema: {schema}
+        Mapping: {mapping}
+
+        Generate SQL only.
+        """
+
+        sql = ask_llm(sql_prompt)
+
+        valid, _ = validate_sql(sql)
+        if not valid:
+            return fallback()
+
+        data = run_query(sql)
+
+        if data.empty:
+            return fallback()
+
+        insights = generate_insights(data)
+
+        if "Technical" in profile:
+            insights += "\n\n🔍 Deeper analysis completed."
+
+        chart = generate_chart_safe(data)
+
+        result = {
+            "insights": insights,
+            "chart": chart,
+            "time": timer.end()
         }
 
-    metric = map_column(query,embeddings)
+        set_cache(query, result)
+        return result
 
-    logger.log(f"Metric mapped → {metric}")
+    except:
+        return fallback()
 
-    dimension=None
 
-    for d in profile["dimensions"]:
-        if d in query.lower():
-            dimension=d
+def fallback():
+    return {
+        "insights": """
+ I couldn’t fully process that.
 
-    plan = plan_query(intent)
-
-    if plan=="groupby":
-        result = groupby_analysis(df,metric,dimension)
-        logger.engine("DuckDB")
-
-    elif plan=="trend":
-        result = trend_analysis(df,metric,profile["time"])
-
-    elif plan=="share":
-        result = share_analysis(df,metric,dimension)
-
-    elif plan=="correlation":
-        result = correlation_analysis(df,metric)
-
-    elif plan=="drivers":
-        result = detect_drivers(df,metric)
-
-    elif plan=="anomaly":
-        result = detect_anomalies(df)
-
-    else:
-        result = df.describe()
-
-    logger.log("Analysis executed")
-
-    insight = generate_insight(query,result,persona)
-
-    output={
-        "data":result,
-        "insight":insight,
-        "steps":logger.steps
+Try:
+- Show trend over time
+- Top 5 categories
+- Summarize insights
+""",
+        "chart": None,
+        "time": 0
     }
-
-    cache_store(key,output)
-
-    return output
