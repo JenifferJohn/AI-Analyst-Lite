@@ -8,7 +8,7 @@ from core.fast_executor import fast_execute
 from analytics.chart_generator import generate_chart
 from guardrails.input_guardrail import validate_user_query
 from guardrails.output_guardrail import validate_output
-from utils.smart_suggestions import generate_smart_questions
+from utils.smart_suggestion import generate_smart_questions
 from utils.smart_naming import apply_friendly_names, humanize_query
 
 
