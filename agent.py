@@ -1,109 +1,120 @@
+import json
 from data_engine import get_schema, get_column_info, run_query, validate_sql
 from insight_engine import generate_insights
 from chart_engine import generate_chart_safe
 from llm import ask_llm
-from utils import match_columns, validate_user_query, get_cached_result, set_cache, Timer
+from utils import StepTimer, validate_user_query, safe_response
 
 
-def extract_entities(query):
+def safe_json(x):
+    try:
+        return json.loads(x)
+    except:
+        return {}
+
+
+def llm_mapping(query, columns):
     prompt = f"""
-    Extract:
-    metric, dimensions
+Map query to columns.
 
-    Query: {query}
+Query: {query}
+Columns: {columns}
 
-    Return JSON.
-    """
-    return eval(ask_llm(prompt))
+Return JSON:
+{{"metric":"","dimensions":[]}}
+"""
+    return safe_json(ask_llm(prompt))
 
 
-def run_agent(query, profile, resolved=None):
+def generate_sql(query, schema, mapping, error=""):
+    prompt = f"""
+Schema:
+{schema}
 
-    timer = Timer()
+Mapping:
+{mapping}
+
+Error:
+{error}
+
+Generate SELECT SQL only.
+"""
+    return ask_llm(prompt)
+
+
+def run_agent(query, profile, stream_callback=None, resolved=None):
+
+    timer = StepTimer()
 
     try:
         validate_user_query(query)
 
-        cached = get_cached_result(query)
-        if cached:
-            return cached
-
         schema = get_schema()
-        column_info = get_column_info()
-        columns = list(column_info.keys())
+        col_info = get_column_info()
+        columns = list(col_info.keys())
 
-        entities = extract_entities(query)
+        # STEP 1
+        step = timer.log("🔄 Understanding query")
+        if stream_callback:
+            stream_callback(f"{step[0]} ({step[1]}s)")
 
-        metric = entities.get("metric", "")
-        dimensions = entities.get("dimensions", [])
+        mapping = resolved if resolved else llm_mapping(query, columns)
 
-        # 🔹 If already resolved from UI
-        if resolved:
-            mapping = resolved
-        else:
-            mapping = match_columns([metric] + dimensions, columns)
+        if not mapping.get("metric"):
+            return safe_response(
+                "I need help selecting the right field 👇",
+                {"metric": columns}
+            )
 
-            # Need clarification
-            for k, v in mapping.items():
-                if len(v) == 0 or len(v) > 1:
-                    return {
-                        "clarification": True,
-                        "mapping": mapping,
-                        "message": "Please clarify your intent "
-                    }
+        # STEP 2
+        step = timer.log("⚡ Generating SQL")
+        if stream_callback:
+            stream_callback(f"{step[0]} ({step[1]}s)")
 
-        # Resolve mapping
-        mapping = {k: v[0] if isinstance(v, list) else v for k, v in mapping.items()}
+        sql = None
+        error = ""
 
-        # Generate SQL
-        sql_prompt = f"""
-        Schema: {schema}
-        Mapping: {mapping}
+        for _ in range(3):
+            sql = generate_sql(query, schema, mapping, error)
+            valid, msg = validate_sql(sql)
+            if valid:
+                break
+            error = msg
 
-        Generate SQL only.
-        """
+        if not sql:
+            return safe_response("Let’s refine your request 👇")
 
-        sql = ask_llm(sql_prompt)
-
-        valid, _ = validate_sql(sql)
-        if not valid:
-            return fallback()
+        # STEP 3
+        step = timer.log("📊 Fetching data")
+        if stream_callback:
+            stream_callback(f"{step[0]} ({step[1]}s)")
 
         data = run_query(sql)
 
         if data.empty:
-            return fallback()
+            return safe_response(
+                "No data found. Try broader query 👇",
+                {"Try": ["Show overall trend", "Summarize insights"]}
+            )
+
+        # STEP 4
+        step = timer.log("📈 Computing insights")
+        if stream_callback:
+            stream_callback(f"{step[0]} ({step[1]}s)")
 
         insights = generate_insights(data)
 
-        if "Technical" in profile:
-            insights += "\n\n🔍 Deeper analysis completed."
-
         chart = generate_chart_safe(data)
 
-        result = {
+        return {
             "insights": insights,
             "chart": chart,
-            "time": timer.end()
+            "data": data,
+            "mapping": mapping,
+            "sql": sql if "Technical" in profile else None,
+            "steps": timer.steps,
+            "time": timer.total()
         }
 
-        set_cache(query, result)
-        return result
-
     except:
-        return fallback()
-
-
-def fallback():
-    return {
-        "insights": """
- I couldn’t fully process that.
-
-Try:
-- Show trend over time
-- Top 5 categories
-- Summarize insights
-""",
-        "chart": None,
-        "time": 0
-    }
+        return safe_response("Let’s try that differently 👇")

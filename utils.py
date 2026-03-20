@@ -1,35 +1,26 @@
-import hashlib
-from difflib import get_close_matches
+import time
 
-CACHE = {}
-
-def validate_user_query(query):
-    blocked = ["drop", "delete", "--"]
-    for b in blocked:
-        if b in query.lower():
-            raise ValueError("Unsafe query")
-    return query
-
-def match_columns(terms, columns):
-    mapping = {}
-    for t in terms:
-        mapping[t] = get_close_matches(t, columns, n=3, cutoff=0.3)
-    return mapping
-
-def get_cache_key(q):
-    return hashlib.md5(q.encode()).hexdigest()
-
-def get_cached_result(q):
-    return CACHE.get(get_cache_key(q))
-
-def set_cache(q, r):
-    CACHE[get_cache_key(q)] = r
+def validate_user_query(q):
+    return q
 
 
-class Timer:
-    import time
+def safe_response(msg, suggestions=None):
+    return {
+        "insights": msg,
+        "suggestions": suggestions,
+        "clarification": True
+    }
+
+
+class StepTimer:
     def __init__(self):
-        self.start = self.time.time()
+        self.start = time.time()
+        self.steps = []
 
-    def end(self):
-        return round(self.time.time() - self.start, 2)
+    def log(self, step):
+        t = round(time.time() - self.start, 2)
+        self.steps.append((step, t))
+        return step, t
+
+    def total(self):
+        return round(time.time() - self.start, 2)
