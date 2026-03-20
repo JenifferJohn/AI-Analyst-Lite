@@ -8,6 +8,7 @@ from core.llm_explainer import generate_explanation
 
 from analytics.insight_engine import generate_insights
 from analytics.root_cause_engine import discover_root_cause
+from analytics.kpi_engine import compute_kpis
 
 
 def execute_query(query, role):
@@ -15,22 +16,29 @@ def execute_query(query, role):
 
     start = time.time()
 
+    # Context update
     context = update_context(query)
 
+    # SQL execution
     sql = generate_sql(query)
     result_df = execute_sql(df, sql)
 
+    # Insights + root cause
     insights = generate_insights(result_df)
     root_cause = discover_root_cause(df)
 
-    # LLM EXPLANATION 
+    # KPI computation (FULL dataset)
+    kpis = compute_kpis(df)
+
+    # LLM explanation (SAFE)
     explanation = None
     if result_df is not None:
         explanation = generate_explanation(
             data=result_df.to_dict(orient="records"),
             insights=insights,
             context=context,
-            role=role   
+            role=role,
+            kpis=kpis
         )
 
     response = format_response(
@@ -41,6 +49,7 @@ def execute_query(query, role):
         root_cause=root_cause
     )
 
+    response["kpis"] = kpis
     response["explanation"] = explanation
     response["context"] = context
     response["execution_time"] = round(time.time() - start, 3)

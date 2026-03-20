@@ -1,29 +1,51 @@
 import requests
 import json
+from utils.number_formatter import format_number_indian_to_international
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
 
-def generate_explanation(data, insights, context, role="non_technical"):
-    """
-    Generates human-friendly narrative using Ollama (Mistral).
-    STRICT: No calculations, no hallucination.
-    """
+def format_data_for_llm(data):
+    formatted = []
 
-    tone_instruction = ""
+    for row in data:
+        new_row = {}
+        for key, val in row.items():
+            if isinstance(val, (int, float)):
+                new_row[key] = format_number_indian_to_international(val)
+            else:
+                new_row[key] = val
+        formatted.append(new_row)
 
+    return formatted
+
+
+def generate_explanation(data, insights, context, role="non_technical", kpis=None):
+
+    formatted_data = format_data_for_llm(data)
+
+    formatted_kpis = {}
+
+    if kpis:
+        formatted_kpis = {
+            "current_sales": format_number_indian_to_international(kpis.get("current_sales")),
+            "previous_sales": format_number_indian_to_international(kpis.get("previous_sales")),
+            "change": format_number_indian_to_international(kpis.get("change")),
+            "pct_change": f"{kpis.get('pct_change', 0):.2f}%",
+            "top_market": kpis.get("top_market"),
+            "top_market_value": format_number_indian_to_international(kpis.get("top_market_value"))
+        }
+
+    # Tone control
     if role == "non_technical":
         tone_instruction = """
 - Use a casual, conversational tone
-- Explain like you're talking to a business manager
 - Highlight key takeaway first
-- Keep it short and clear
 """
     else:
         tone_instruction = """
 - Use a professional analytical tone
-- Mention key drivers and patterns
-- Be concise but insightful
+- Focus on drivers and patterns
 """
 
     prompt = f"""
@@ -32,15 +54,14 @@ You are a business analyst.
 STRICT RULES:
 - Use ONLY the provided data
 - DO NOT calculate anything
-- DO NOT assume missing values
 - DO NOT hallucinate
 - DO NOT change numbers
 
-TONE:
-{tone_instruction}
-
 DATA:
-{json.dumps(data, indent=2)}
+{json.dumps(formatted_data, indent=2)}
+
+KPIs:
+{json.dumps(formatted_kpis, indent=2)}
 
 INSIGHTS:
 {insights}
@@ -49,22 +70,27 @@ CONTEXT:
 {context}
 
 TASK:
-Write a clear explanation of the results.
-Focus on:
-- What is happening
-- Any standout patterns
+Explain clearly for business users.
+
+Include:
+- Growth or decline (%)
+- Previous vs current comparison
+- Top performer
 - Key takeaway
 
-Keep it short (3–5 sentences max).
+IMPORTANT:
+Use both readable + exact numbers.
+Example: "1.2 billion (1,200,000,000)"
+
+TONE:
+{tone_instruction}
 """
 
     payload = {
         "model": "mistral",
         "prompt": prompt,
         "stream": False,
-        "options": {
-            "temperature": 0.2  # slight natural tone, still controlled
-        }
+        "options": {"temperature": 0.2}
     }
 
     try:
