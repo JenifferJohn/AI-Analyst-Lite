@@ -1,99 +1,150 @@
 import streamlit as st
 import pandas as pd
-from agent import run_agent
+import time
 
-st.title(" AI Analyst")
+from core.cache import set_dataframe
+from core.executor import execute_query
+from analytics.chart_generator import generate_chart
+from guardrails.input_guardrail import validate_user_query
+from guardrails.output_guardrail import validate_output
 
-# --- SESSION INIT ---
-for key in ["query", "clarification", "suggestions"]:
-    if key not in st.session_state:
-        st.session_state[key] = None
 
-profile = st.selectbox(
+# -------------------------------
+# PAGE CONFIG
+# -------------------------------
+st.set_page_config(page_title="AI Analyst", layout="wide")
+
+st.title("AI Analyst")
+
+
+# -------------------------------
+# SESSION STATE
+# -------------------------------
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "df_loaded" not in st.session_state:
+    st.session_state.df_loaded = False
+
+
+# -------------------------------
+# SIDEBAR
+# -------------------------------
+role = st.sidebar.selectbox(
     "User Type",
-    ["Non-Technical Manager", "Technical Manager"]
+    ["non_technical", "technical"]
 )
 
-file = st.file_uploader("Upload Excel", type=["xlsx"])
+uploaded_file = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
 
-if file:
-    df = pd.read_excel(file)
-    st.session_state["df"] = df
-    st.write("### Columns:", df.columns.tolist())
 
-    # auto-run first insight
-    if not st.session_state.query:
-        st.session_state.query = "Summarize key insights"
+# -------------------------------
+# DATA LOADER
+# -------------------------------
+@st.cache_data
+def load_data(file):
+    return pd.read_excel(file)
 
-# --- STREAM OUTPUT ---
-output_box = st.empty()
 
-def stream_callback(msg):
-    with output_box.container():
-        st.write(msg)
+# -------------------------------
+# LOAD DATA
+# -------------------------------
+if uploaded_file and not st.session_state.df_loaded:
+    df = load_data(uploaded_file)
+    set_dataframe(df)
+    st.session_state.df_loaded = True
+    st.success("Data loaded successfully and cached")
 
-# --- USER INPUT ---
-user_query = st.chat_input("Ask your question...")
 
-if user_query:
-    st.session_state.query = user_query
+# -------------------------------
+# DISPLAY CHAT HISTORY
+# -------------------------------
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# --- MAIN EXECUTION ---
-if st.session_state.query:
 
-    result = run_agent(
-        st.session_state.query,
-        profile,
-        stream_callback=stream_callback
-    )
+# -------------------------------
+# CHAT INPUT
+# -------------------------------
+if prompt := st.chat_input("Ask your data question..."):
 
-    # --- CLARIFICATION ---
-    if result.get("clarification"):
-        st.session_state.clarification = True
-        st.session_state.suggestions = result["suggestions"]
+    # Save user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # --- HANDLE CLARIFICATION ---
-    if st.session_state.clarification:
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-        st.warning("Let’s refine your request 👇")
+    # -------------------------------
+    # ASSISTANT RESPONSE
+    # -------------------------------
+    with st.chat_message("assistant"):
 
-        selections = {}
+        try:
+            # INPUT GUARDRAIL
+            validate_user_query(prompt)
 
-        for k, v in st.session_state.suggestions.items():
-            selections[k] = st.selectbox(f"Select {k}", v)
+            # STATUS UPDATES (REAL-TIME FEEL)
+            status = st.empty()
 
-        if st.button("Confirm Selection"):
-            result = run_agent(
-                st.session_state.query,
-                profile,
-                resolved=selections
-            )
-            st.session_state.clarification = False
+            status.info("Understanding context...")
+            time.sleep(0.2)
 
-    # --- OUTPUT ---
-    if result.get("insights"):
-        st.write("### 📊 Insights")
-        st.write(result["insights"])
+            status.info("Generating SQL from context...")
+            time.sleep(0.2)
 
-    if result.get("chart"):
-        st.pyplot(result["chart"])
+            start = time.time()
 
-    # 🔍 DATA EVIDENCE
-    if result.get("data") is not None:
-        st.write("### 🔍 Data Evidence")
-        st.dataframe(result["data"].head(10))
+            status.info("Executing query on full dataset...")
+            result = execute_query(prompt, role)
 
-    # ⏱ Timeline
-    if result.get("steps"):
-        st.write("### ⏱ Execution Summary")
-        for step, t in result["steps"]:
-            st.write(f"{step} → {t}s")
+            status.info(" Validating output...")
+            time.sleep(0.2)
 
-        st.success(f"✅ Completed in {result['time']}s")
+            # OUTPUT GUARDRAIL
+            result = validate_output(result)
 
-    # 👨‍💻 Technical view
-    if "Technical" in profile:
-        with st.expander("🔍 Debug Info"):
-            st.json(result.get("mapping", {}))
-            if result.get("sql"):
-                st.code(result["sql"], language="sql")
+            end = time.time()
+
+            status.empty()
+
+            # -------------------------------
+            # SHOW RESULT (RAW)
+            # -------------------------------
+            st.subheader("📦 Result")
+            st.json(result)
+
+            # -------------------------------
+            # LLM EXPLANATION (OLLAMA)
+            # -------------------------------
+            if result.get("explanation"):
+                st.subheader("Explanation (LLM Generated)")
+                st.write(result["explanation"])
+
+            # -------------------------------
+            # CONTEXT (TRANSPARENCY)
+            # -------------------------------
+            st.subheader("🧠 Context Used")
+            st.json(result.get("context", {}))
+
+            # -------------------------------
+            # CHART GENERATION
+            # -------------------------------
+            if "data" in result and result["data"]:
+                chart_df = pd.DataFrame(result["data"])
+                st.subheader("Visualization")
+                generate_chart(chart_df)
+
+            # -------------------------------
+            # EXECUTION TIME
+            # -------------------------------
+            st.success(f"⏱ Completed in {round(end - start, 3)} sec")
+
+            # Save assistant message
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": str(result)
+            })
+
+        except Exception as e:
+            st.error(str(e))
