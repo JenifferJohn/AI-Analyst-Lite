@@ -7,6 +7,7 @@ from core.executor import execute_query
 from analytics.chart_generator import generate_chart
 from guardrails.input_guardrail import validate_user_query
 from guardrails.output_guardrail import validate_output
+from utils.smart_suggestions import generate_smart_questions
 
 
 st.set_page_config(page_title="AI Analyst", layout="wide")
@@ -20,6 +21,9 @@ if "messages" not in st.session_state:
 
 if "df_loaded" not in st.session_state:
     st.session_state.df_loaded = False
+
+if "suggested_query" not in st.session_state:
+    st.session_state.suggested_query = None
 
 
 # Sidebar
@@ -41,17 +45,61 @@ if uploaded_file and not st.session_state.df_loaded:
     df = load_data(uploaded_file)
     set_dataframe(df)
     st.session_state.df_loaded = True
-    st.success("✅ Data loaded successfully")
+    st.session_state.df = df
+    st.success("Data loaded successfully")
 
 
+# -----------------------------
+# Smart Suggestions UI
+# -----------------------------
+def set_suggested_query(q):
+    st.session_state.suggested_query = q
+
+
+if st.session_state.get("df_loaded"):
+
+    st.subheader("Smart Suggestions")
+
+    suggestions = generate_smart_questions(st.session_state.df)
+
+    cols = st.columns(2)
+
+    for i, q in enumerate(suggestions):
+        cols[i % 2].button(q, on_click=set_suggested_query, args=(q,))
+
+
+# -----------------------------
+# Safety Filter
+# -----------------------------
+def is_safe_query(query):
+    unsafe_keywords = ["why", "predict", "forecast", "recommend", "suggest"]
+    return not any(word in query.lower() for word in unsafe_keywords)
+
+
+# -----------------------------
 # Chat history
+# -----------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 
-# Chat input
-if prompt := st.chat_input("Ask your data question..."):
+# -----------------------------
+# Determine input source
+# -----------------------------
+prompt = None
+
+if st.session_state.suggested_query:
+    prompt = st.session_state.suggested_query
+    st.session_state.suggested_query = None
+else:
+    prompt = st.chat_input("Ask your data question...")
+
+
+# -----------------------------
+# Execution Flow
+# -----------------------------
+if prompt:
 
     st.session_state.messages.append({"role": "user", "content": prompt})
 
@@ -61,6 +109,9 @@ if prompt := st.chat_input("Ask your data question..."):
     with st.chat_message("assistant"):
 
         try:
+            if not is_safe_query(prompt):
+                raise ValueError("Ask a structured data question")
+
             validate_user_query(prompt)
 
             status = st.empty()
@@ -84,31 +135,26 @@ if prompt := st.chat_input("Ask your data question..."):
             end = time.time()
             status.empty()
 
-            # Result
             st.subheader("Result")
             st.json(result)
 
-            # KPI
             if result.get("kpis"):
                 st.subheader("KPI Summary")
                 st.json(result["kpis"])
 
-            # Explanation
             if result.get("explanation"):
                 st.subheader("Business Narrative")
                 st.write(result["explanation"])
 
-            # Context
             st.subheader("Context Used")
             st.json(result.get("context", {}))
 
-            # Chart
             if "data" in result and result["data"]:
                 chart_df = pd.DataFrame(result["data"])
-                st.subheader("📊 Visualization")
+                st.subheader("Visualization")
                 generate_chart(chart_df)
 
-            st.success(f"⏱ Completed in {round(end - start, 3)} sec")
+            st.write(f"Completed in {round(end - start, 3)} sec")
 
             st.session_state.messages.append({
                 "role": "assistant",
