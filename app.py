@@ -4,10 +4,12 @@ import time
 
 from core.cache import set_dataframe
 from core.executor import execute_query
+from core.fast_executor import fast_execute
 from analytics.chart_generator import generate_chart
 from guardrails.input_guardrail import validate_user_query
 from guardrails.output_guardrail import validate_output
 from utils.smart_suggestions import generate_smart_questions
+from utils.smart_naming import apply_friendly_names, humanize_query
 
 
 st.set_page_config(page_title="AI Analyst", layout="wide")
@@ -15,7 +17,9 @@ st.set_page_config(page_title="AI Analyst", layout="wide")
 st.title("AI Analyst Chatbot")
 
 
+# -----------------------------
 # Session state
+# -----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -26,7 +30,9 @@ if "suggested_query" not in st.session_state:
     st.session_state.suggested_query = None
 
 
+# -----------------------------
 # Sidebar
+# -----------------------------
 role = st.sidebar.selectbox(
     "User Type",
     ["non_technical", "technical"]
@@ -40,17 +46,25 @@ def load_data(file):
     return pd.read_excel(file)
 
 
+# -----------------------------
 # Load data
+# -----------------------------
 if uploaded_file and not st.session_state.df_loaded:
     df = load_data(uploaded_file)
-    set_dataframe(df)
-    st.session_state.df_loaded = True
+
+    clean_df, col_map = apply_friendly_names(df)
+
+    set_dataframe(df)  # keep original for execution
     st.session_state.df = df
+    st.session_state.clean_df = clean_df
+    st.session_state.col_map = col_map
+
+    st.session_state.df_loaded = True
     st.success("Data loaded successfully")
 
 
 # -----------------------------
-# Smart Suggestions UI
+# Smart Suggestions
 # -----------------------------
 def set_suggested_query(q):
     st.session_state.suggested_query = q
@@ -77,7 +91,15 @@ def is_safe_query(query):
 
 
 # -----------------------------
-# Chat history
+# Fast Query Router
+# -----------------------------
+def is_fast_query(query):
+    keywords = ["total", "sales", "by", "trend", "growth", "top", "market", "product"]
+    return any(k in query.lower() for k in keywords)
+
+
+# -----------------------------
+# Chat History
 # -----------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -85,7 +107,7 @@ for msg in st.session_state.messages:
 
 
 # -----------------------------
-# Determine input source
+# Input Source
 # -----------------------------
 prompt = None
 
@@ -101,10 +123,12 @@ else:
 # -----------------------------
 if prompt:
 
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    display_prompt = humanize_query(prompt, st.session_state.get("col_map", {}))
+
+    st.session_state.messages.append({"role": "user", "content": display_prompt})
 
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(display_prompt)
 
     with st.chat_message("assistant"):
 
@@ -119,13 +143,25 @@ if prompt:
             status.info("Understanding context...")
             time.sleep(0.2)
 
-            status.info("Generating SQL...")
-            time.sleep(0.2)
+            status.info("Routing query...")
+            time.sleep(0.1)
 
             start = time.time()
 
-            status.info("Executing query...")
-            result = execute_query(prompt, role)
+            df = st.session_state.get("df")
+
+            # -----------------------------
+            # FAST PATH
+            # -----------------------------
+            if is_fast_query(prompt):
+                fast_result = fast_execute(prompt, df)
+                if fast_result:
+                    result = fast_result
+                else:
+                    status.info("Falling back to full engine...")
+                    result = execute_query(prompt, role)
+            else:
+                result = execute_query(prompt, role)
 
             status.info("Validating output...")
             time.sleep(0.2)
@@ -135,6 +171,9 @@ if prompt:
             end = time.time()
             status.empty()
 
+            # -----------------------------
+            # RESULT DISPLAY
+            # -----------------------------
             st.subheader("Result")
             st.json(result)
 
