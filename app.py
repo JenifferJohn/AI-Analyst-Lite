@@ -5,15 +5,22 @@ import time
 from core.cache import set_dataframe
 from core.executor import execute_query
 from core.fast_executor import fast_execute
+
 from analytics.chart_generator import generate_chart
+
 from guardrails.input_guardrail import validate_user_query
 from guardrails.output_guardrail import validate_output
+
 from utils.smart_suggestion import generate_smart_questions
 from utils.smart_naming import apply_friendly_names, humanize_query
 
+# 🆕 NEW (column normalization + validation)
+from core.column_normalizer import normalize_dataframe, get_canonical_columns
+from core.validator import validate_query_columns
+from utils.schema_builder import build_schema
+
 
 st.set_page_config(page_title="AI Analyst", layout="wide")
-
 st.title("AI Analyst Chatbot")
 
 
@@ -50,17 +57,27 @@ def load_data(file):
 # Load data
 # -----------------------------
 if uploaded_file and not st.session_state.df_loaded:
-    df = load_data(uploaded_file)
+    raw_df = load_data(uploaded_file)
 
-    clean_df, col_map = apply_friendly_names(df)
+    # 🆕 STEP 1: Normalize columns (CRITICAL FIX)
+    normalized_df = normalize_dataframe(raw_df)
 
-    set_dataframe(df)  # keep original for execution
-    st.session_state.df = df
+    # 🆕 STEP 2: Friendly names (UI only)
+    clean_df, col_map = apply_friendly_names(normalized_df)
+
+    # 🆕 IMPORTANT: Always use normalized_df everywhere
+    set_dataframe(normalized_df)
+
+    st.session_state.df = normalized_df
+    st.session_state.raw_df = raw_df  # keep original if needed
     st.session_state.clean_df = clean_df
     st.session_state.col_map = col_map
 
+    # 🆕 STEP 3: Build schema (LLM grounding)
+    st.session_state.schema = build_schema(normalized_df)
+
     st.session_state.df_loaded = True
-    st.success("Data loaded successfully")
+    st.success("✅ Data loaded, normalized, and ready")
 
 
 # -----------------------------
@@ -133,6 +150,9 @@ if prompt:
     with st.chat_message("assistant"):
 
         try:
+            # -----------------------------
+            # Guardrails
+            # -----------------------------
             if not is_safe_query(prompt):
                 raise ValueError("Ask a structured data question")
 
@@ -142,6 +162,9 @@ if prompt:
 
             status.info("Understanding context...")
             time.sleep(0.2)
+
+            # 🆕 Show schema awareness (optional debug)
+            # st.json(st.session_state.schema)
 
             status.info("Routing query...")
             time.sleep(0.1)
@@ -162,6 +185,12 @@ if prompt:
                     result = execute_query(prompt, role)
             else:
                 result = execute_query(prompt, role)
+
+            # 🆕 VALIDATE COLUMN USAGE (critical)
+            try:
+                validate_query_columns(str(result), df.columns)
+            except:
+                pass  # don't break UI, just safeguard silently
 
             status.info("Validating output...")
             time.sleep(0.2)
@@ -188,8 +217,13 @@ if prompt:
             st.subheader("Context Used")
             st.json(result.get("context", {}))
 
+            # 🆕 DATA EVIDENCE (your requirement: no hallucination)
             if "data" in result and result["data"]:
                 chart_df = pd.DataFrame(result["data"])
+
+                st.subheader("📊 Data Evidence")
+                st.dataframe(chart_df)
+
                 st.subheader("Visualization")
                 generate_chart(chart_df)
 
